@@ -1,0 +1,41 @@
+# WEB SERVER
+fastapi
+uvicorn
+websockets
+python-dotenv
+pydantic
+
+# AI BRAIN
+anthropic
+
+# PC CONTROL
+pywinauto
+uiautomation
+pywin32
+keyboard
+pyautogui
+psutil
+pyperclip
+mss
+send2trash
+
+# NVDA
+comtypes
+
+# BROWSER CONTROL
+playwright
+browser-use
+
+# SCREEN READING / OCR
+easyocr
+Pillow
+opencv-python
+
+# FILE OPERATIONS
+aiofiles
+
+# MEMORY
+chromadb
+
+# LOGGING
+loguru
