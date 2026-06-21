@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoxSense — Camera Eyes</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#07080f;
+  --surface:#0e1018;
+  --card:#13151f;
+  --border:rgba(255,255,255,0.07);
+  --border-hi:rgba(255,255,255,0.13);
+  --text:#f0f2f8;
+  --muted:#6b7280;
+  --dim:#3a3d4a;
+  --accent:#6ee7f7;
+  --accent2:#818cf8;
+  --green:#34d399;
+  --yellow:#fbbf24;
+  --red:#f87171;
+}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'DM Sans',sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  overflow-x:hidden;
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:0;opacity:0.4;
+}
+.glow-orb{position:fixed;border-radius:50%;pointer-events:none;z-index:0;filter:blur(120px)}
+.glow-orb-1{width:400px;height:400px;background:radial-gradient(circle,rgba(110,231,247,0.05) 0%,transparent 70%);top:-80px;left:-80px}
+.glow-orb-2{width:350px;height:350px;background:radial-gradient(circle,rgba(248,113,113,0.04) 0%,transparent 70%);bottom:-50px;right:-60px}
+
+/* ── HEADER ── */
+header{
+  width:100%;max-width:860px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:20px 28px;position:relative;z-index:10;
+  border-bottom:1px solid var(--border);
+}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-mark{
+  width:32px;height:32px;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+}
+.logo-name{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em}
+.logo-name span{color:var(--accent)}
+.page-tag{
+  font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--accent);background:rgba(110,231,247,0.08);
+  border:1px solid rgba(110,231,247,0.2);border-radius:999px;padding:4px 14px;
+}
+.back-btn{
+  background:var(--card);border:1px solid var(--border);
+  color:var(--muted);border-radius:10px;padding:8px 16px;
+  cursor:pointer;font-size:13px;font-family:'DM Sans',sans-serif;
+  transition:all 0.2s;font-weight:500;
+}
+.back-btn:hover{border-color:var(--border-hi);color:var(--text)}
+
+/* ── MAIN ── */
+main{
+  flex:1;width:100%;max-width:860px;
+  padding:24px 28px 100px;
+  position:relative;z-index:5;
+  display:flex;flex-direction:column;align-items:center;gap:20px;
+}
+
+/* ── STATUS BANNER ── */
+.status-banner{
+  width:100%;max-width:680px;
+  border-radius:14px;padding:14px 20px;
+  display:flex;align-items:center;gap:12px;
+  border:1px solid;transition:all 0.4s;
+}
+.status-banner.loading{background:rgba(110,231,247,0.05);border-color:rgba(110,231,247,0.2)}
+.status-banner.safe{background:rgba(52,211,153,0.06);border-color:rgba(52,211,153,0.25)}
+.status-banner.warning{background:rgba(251,191,36,0.06);border-color:rgba(251,191,36,0.3);animation:pulse-warn 1.5s ease-in-out infinite}
+.status-banner.danger{background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.4);animation:pulse-danger 0.8s ease-in-out infinite}
+@keyframes pulse-warn{0%,100%{opacity:1}50%{opacity:0.7}}
+@keyframes pulse-danger{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,0.3)}50%{box-shadow:0 0 0 8px rgba(248,113,113,0)}}
+.s-icon{font-size:26px;flex-shrink:0}
+.s-body{flex:1}
+.s-title{font-size:15px;font-weight:600;margin-bottom:2px}
+.s-sub{font-size:12px;color:var(--muted)}
+
+/* ── CAMERA AREA ── */
+.cam-wrap{
+  position:relative;width:100%;max-width:680px;
+  border-radius:18px;overflow:hidden;
+  border:1px solid var(--border);background:#000;
+  aspect-ratio:16/9;
+}
+#cameraVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+#detectionCanvas{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)}
+.cam-overlay{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+  background:rgba(7,8,15,0.88);transition:opacity 0.5s;
+}
+.cam-overlay.hidden{opacity:0;pointer-events:none}
+.cam-overlay-icon{font-size:52px}
+.cam-overlay-text{font-size:14px;color:var(--muted);text-align:center;padding:0 24px;line-height:1.6}
+
+/* ── DETECTIONS ── */
+.detections-wrap{width:100%;max-width:680px}
+.det-label{font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.det-list{display:flex;flex-direction:column;gap:7px;min-height:44px}
+.det-item{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 16px;border-radius:12px;
+  font-size:13px;border:1px solid;
+  animation:fadeup 0.25s ease;
+}
+@keyframes fadeup{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+.det-item.danger{background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.25)}
+.det-item.warning{background:rgba(251,191,36,0.06);border-color:rgba(251,191,36,0.2)}
+.det-item.info{background:rgba(59,130,246,0.06);border-color:rgba(59,130,246,0.15)}
+.det-badge{font-size:18px}
+.det-msg{flex:1}
+.det-dir{font-size:11px;color:var(--muted);white-space:nowrap}
+.det-empty{font-size:13px;color:var(--muted);padding:10px 0}
+
+/* ── CONTROLS ── */
+.controls{
+  width:100%;max-width:680px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+}
+.ctrl{
+  padding:13px 10px;border-radius:12px;cursor:pointer;
+  font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;
+  border:1px solid;transition:all 0.2s;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.ctrl:hover{transform:translateY(-1px)}
+.ctrl:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.ctrl:disabled{opacity:0.35;cursor:not-allowed;transform:none}
+.ctrl.start{background:rgba(110,231,247,0.08);border-color:rgba(110,231,247,0.25);color:var(--accent)}
+.ctrl.start:hover:not(:disabled){background:rgba(110,231,247,0.15)}
+.ctrl.stop{background:rgba(248,113,113,0.08);border-color:rgba(248,113,113,0.25);color:var(--red)}
+.ctrl.stop:hover:not(:disabled){background:rgba(248,113,113,0.14)}
+.ctrl.scan{background:rgba(52,211,153,0.08);border-color:rgba(52,211,153,0.25);color:var(--green)}
+.ctrl.scan:hover:not(:disabled){background:rgba(52,211,153,0.14)}
+.ctrl.help{background:var(--card);border-color:var(--border);color:var(--muted)}
+.ctrl.help:hover{border-color:var(--border-hi);color:var(--text)}
+
+/* ── VOICE COMMANDS CARD ── */
+.vc-card{
+  width:100%;max-width:680px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:16px;padding:18px 22px;
+}
+.vc-title{
+  font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:14px;
+}
+.vc-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.vc-row{
+  display:flex;align-items:center;gap:8px;
+  font-size:13px;color:var(--muted);padding:8px 10px;
+  background:rgba(255,255,255,0.02);border-radius:8px;
+  border:1px solid var(--border);
+}
+.vc-row strong{color:var(--accent2);font-weight:600;font-size:12px}
+
+/* ── FOOTER ── */
+footer{
+  position:fixed;bottom:0;left:0;right:0;
+  background:rgba(7,8,15,0.9);backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);z-index:50;
+  display:flex;justify-content:center;
+}
+.foot-nav{display:flex;max-width:400px;width:100%}
+.foot-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:12px 0 16px;font-size:11px;color:var(--muted);cursor:pointer;
+  transition:color 0.2s;border-top:2px solid transparent;margin-top:-1px;
+  font-weight:600;letter-spacing:0.04em;text-transform:uppercase;
+}
+.foot-item.on{color:var(--accent);border-top-color:var(--accent)}
+.foot-item:hover{color:var(--text)}
+.foot-icon{font-size:20px}
+
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+</style>
+</head>
+<body>
+<div class="glow-orb glow-orb-1"></div>
+<div class="glow-orb glow-orb-2"></div>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">🎙</div>
+    <div class="logo-name">Vox<span>Sense</span></div>
+  </div>
+  <div class="page-tag">👁️ Camera Eyes</div>
+  <button class="back-btn" onclick="goBack()">← Back</button>
+</header>
+
+<main>
+
+  <!-- Status Banner -->
+  <div class="status-banner loading" id="statusBanner" role="status" aria-live="assertive">
+    <div class="s-icon" id="sIcon">⏳</div>
+    <div class="s-body">
+      <div class="s-title" id="sTitle">Loading Camera Eyes...</div>
+      <div class="s-sub" id="sSub">Please wait while AI model loads</div>
+    </div>
+  </div>
+
+  <!-- Camera -->
+  <div class="cam-wrap" aria-label="Camera feed for obstacle detection">
+    <video id="cameraVideo" autoplay playsinline muted aria-hidden="true"></video>
+    <canvas id="detectionCanvas" aria-hidden="true"></canvas>
+    <div class="cam-overlay" id="camOverlay">
+      <div class="cam-overlay-icon">📷</div>
+      <div class="cam-overlay-text" id="overlayText">Camera Eyes ready<br>Press <strong>Start Camera</strong> to begin</div>
+    </div>
+  </div>
+
+  <!-- Detections -->
+  <div class="detections-wrap">
+    <div class="det-label">Detected Objects</div>
+    <div class="det-list" id="detList" aria-live="polite" role="log">
+      <div class="det-empty">No objects detected yet...</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" role="group" aria-label="Camera controls">
+    <button class="ctrl start" id="btnStart" onclick="startCamera()">📷 Start</button>
+    <button class="ctrl stop"  id="btnStop"  onclick="stopCamera()"  disabled>⏹ Stop</button>
+    <button class="ctrl scan"  id="btnScan"  onclick="scanOnce()"    disabled>🔍 Scan</button>
+    <button class="ctrl help"               onclick="speakHelp()">❓ Help</button>
+  </div>
+
+  <!-- Voice Commands -->
+  <div class="vc-card">
+    <div class="vc-title">Voice Commands</div>
+    <div class="vc-grid">
+      <div class="vc-row"><strong>"Start camera"</strong> — Begin detection</div>
+      <div class="vc-row"><strong>"Stop camera"</strong> — Pause detection</div>
+      <div class="vc-row"><strong>"What's in front"</strong> — Single scan</div>
+      <div class="vc-row"><strong>"Describe surroundings"</strong> — Full scan</div>
+      <div class="vc-row"><strong>"Any danger"</strong> — Check threats only</div>
+      <div class="vc-row"><strong>"How far is it"</strong> — Nearest distance</div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <nav class="foot-nav">
+    <div class="foot-item" onclick="goBack()" tabindex="0" role="button">
+      <div class="foot-icon">🏠</div><span>Home</span>
+    </div>
+    <div class="foot-item on" tabindex="0" role="button" aria-current="page">
+      <div class="foot-icon">👁️</div><span>Camera</span>
+    </div>
+  </nav>
+</footer>
+
+<script>
+const synth=window.speechSynthesis;
+let model=null,videoStream=null,detecting=false,cooldowns={},animFrame=null;
+const video=document.getElementById('cameraVideo');
+const canvas=document.getElementById('detectionCanvas');
+const ctx=canvas.getContext('2d');
+
+const PRIORITY={
+  car:{level:'danger',msg:'Car ahead, stop immediately',icon:'🚗'},
+  truck:{level:'danger',msg:'Truck nearby, stop now',icon:'🚛'},
+  bus:{level:'danger',msg:'Bus ahead, be careful',icon:'🚌'},
+  motorcycle:{level:'danger',msg:'Motorcycle approaching',icon:'🏍️'},
+  bicycle:{level:'danger',msg:'Bicycle nearby, slow down',icon:'🚲'},
+  person:{level:'danger',msg:'Person ahead, slow down',icon:'🧍'},
+  dog:{level:'danger',msg:'Dog nearby, be careful',icon:'🐕'},
+  cat:{level:'danger',msg:'Animal nearby',icon:'🐈'},
+  'traffic light':{level:'danger',msg:'Traffic light ahead',icon:'🚦'},
+  'stop sign':{level:'danger',msg:'Stop sign ahead',icon:'🛑'},
+  chair:{level:'warning',msg:'Chair in your path',icon:'🪑'},
+  'dining table':{level:'warning',msg:'Table ahead',icon:'🪵'},
+  bench:{level:'warning',msg:'Bench nearby',icon:'🪑'},
+  'potted plant':{level:'warning',msg:'Plant on the side',icon:'🪴'},
+  suitcase:{level:'warning',msg:'Bag on the ground',icon:'🧳'},
+  backpack:{level:'warning',msg:'Backpack nearby',icon:'🎒'},
+  couch:{level:'warning',msg:'Sofa in your path',icon:'🛋️'},
+  bed:{level:'warning',msg:'Bed ahead',icon:'🛏️'},
+  stairs:{level:'warning',msg:'Stairs ahead, careful',icon:'🪜'},
+  bottle:{level:'info',msg:'Bottle nearby',icon:'🍶'},
+  cup:{level:'info',msg:'Cup on surface',icon:'☕'},
+  laptop:{level:'info',msg:'Laptop on surface',icon:'💻'},
+  'cell phone':{level:'info',msg:'Phone nearby',icon:'📱'},
+  keyboard:{level:'info',msg:'Keyboard on surface',icon:'⌨️'},
+};
+
+function speak(text,urgency='normal'){
+  if(synth.speaking){ if(urgency==='danger') synth.cancel(); else return; }
+  const u=new SpeechSynthesisUtterance(text);
+  if(urgency==='danger'){u.rate=1.4;u.volume=1;u.pitch=1.3}
+  else if(urgency==='warning'){u.rate=1.1;u.volume=0.9;u.pitch=1.1}
+  else{u.rate=0.95;u.volume=0.85;u.pitch=1}
+  u.lang='en-US'; synth.speak(u);
+}
+
+function vibrate(){ if(navigator.vibrate) navigator.vibrate([300,100,300]); }
+
+function getDistance(bbox){
+  const ratio=(bbox[2]*bbox[3])/(video.videoWidth*video.videoHeight);
+  if(ratio>0.35) return{label:'very close',urgency:'danger'};
+  if(ratio>0.15) return{label:'close',urgency:'warning'};
+  if(ratio>0.05) return{label:'medium',urgency:'normal'};
+  return{label:'far',urgency:'normal'};
+}
+
+function getDirection(bbox){
+  const cx=bbox[0]+bbox[2]/2;
+  const w=video.videoWidth;
+  if(cx<w/3) return'on your left';
+  if(cx>(w/3)*2) return'on your right';
+  return'directly ahead';
+}
+
+function buildMsg(label,dir,dist){
+  const info=PRIORITY[label];
+  if(!info) return`${label} ${dir}`;
+  if(dist.label==='very close') return`DANGER! ${info.msg} ${dir}, extremely close, STOP NOW!`;
+  if(dist.label==='close') return`Warning! ${info.msg} ${dir}, getting close`;
+  if(dist.label==='medium') return`${info.msg} ${dir}`;
+  return`${info.msg} detected ${dir}, far away`;
+}
+
+function isOnCooldown(key){return!!cooldowns[key]}
+function setCooldown(key,ms){cooldowns[key]=true;setTimeout(()=>{delete cooldowns[key]},ms)}
+
+function setStatus(type,icon,title,sub){
+  const b=document.getElementById('statusBanner');
+  b.className='status-banner '+type;
+  document.getElementById('sIcon').textContent=icon;
+  document.getElementById('sTitle').textContent=title;
+  document.getElementById('sSub').textContent=sub;
+}
+
+function updateDetections(items){
+  const list=document.getElementById('detList');
+  if(!items.length){
+    list.innerHTML='<div class="det-empty">✅ Path is clear — no obstacles detected</div>';
+    setStatus('safe','✅','Path Clear','No obstacles detected');
+    return;
+  }
+  const order={danger:0,warning:1,info:2};
+  items.sort((a,b)=>order[a.level]-order[b.level]);
+  list.innerHTML=items.map(d=>`
+    <div class="det-item ${d.level}">
+      <div class="det-badge">${d.icon}</div>
+      <div class="det-msg">${d.message}</div>
+      <div class="det-dir">${d.direction}</div>
+    </div>`).join('');
+  const top=items[0];
+  if(top.level==='danger') setStatus('danger','🚨','DANGER DETECTED',top.message);
+  else if(top.level==='warning') setStatus('warning','⚠️','Obstacle Nearby',top.message);
+  else setStatus('safe','👁️','Objects Detected',`${items.length} object(s) in view`);
+}
+
+function drawBoxes(preds){
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  preds.forEach(p=>{
+    const info=PRIORITY[p.class];
+    const color=info?(info.level==='danger'?'#f87171':info.level==='warning'?'#fbbf24':'#3b82f6'):'#64748b';
+    const[x,y,w,h]=p.bbox;
+    ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle=color;ctx.font='bold 13px DM Sans,sans-serif';
+    const lbl=`${p.class} ${Math.round(p.score*100)}%`;
+    const tw=ctx.measureText(lbl).width+10;
+    ctx.fillRect(x,y-20,tw,20);
+    ctx.fillStyle='#fff';ctx.fillText(lbl,x+5,y-5);
+  });
+}
+
+async function detectFrame(){
+  if(!detecting||!model) return;
+  try{
+    const preds=await model.detect(video);
+    const valid=preds.filter(p=>p.score>0.55);
+    drawBoxes(valid);
+    const alertItems=[];
+    const sorted=valid.sort((a,b)=>{
+      const pa=PRIORITY[a.class];const pb=PRIORITY[b.class];
+      const ord={danger:0,warning:1,info:2};
+      return(ord[pa?.level]??3)-(ord[pb?.level]??3);
+    });
+    for(const pred of sorted){
+      const{class:label,bbox}=pred;
+      const info=PRIORITY[label];
+      if(!info) continue;
+      const dist=getDistance(bbox);
+      const dir=getDirection(bbox);
+      const msg=buildMsg(label,dir,dist);
+      const key=`${label}_${dir}`;
+      alertItems.push({level:info.level,icon:info.icon,message:msg,direction:dir});
+      if(!isOnCooldown(key)){
+        if(info.level!=='info'){
+          const urg=info.level==='danger'?'danger':'warning';
+          speak(msg,urg);
+          if(info.level==='danger') vibrate();
+          setCooldown(key,info.level==='danger'?4000:6000);
+        }
+      }
+    }
+    updateDetections(alertItems);
+  }catch(err){console.error('Detection error:',err)}
+  animFrame=requestAnimationFrame(detectFrame);
+}
+
+async function startCamera(){
+  try{
+    setStatus('loading','⏳','Starting Camera...','Requesting camera access');
+    speak('Starting camera eyes. Please wait.');
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:640,height:480}
+    });
+    video.srcObject=stream; videoStream=stream;
+    await video.play();
+    document.getElementById('camOverlay').classList.add('hidden');
+    if(!model){
+      setStatus('loading','🧠','Loading AI Model...','COCO-SSD loading — please wait');
+      speak('Loading AI brain. This may take a moment.');
+      model=await cocoSsd.load();
+      speak('Camera eyes are now active. I will guide you safely.');
+    } else speak('Camera is now active.');
+    detecting=true;
+    setStatus('safe','👁️','Camera Eyes Active','Scanning your surroundings...');
+    document.getElementById('btnStart').disabled=true;
+    document.getElementById('btnStop').disabled=false;
+    document.getElementById('btnScan').disabled=false;
+    detectFrame();
+  }catch(err){
+    console.error(err);
+    if(err.name==='NotAllowedError'){
+      speak('Camera permission denied. Please allow camera access.');
+      setStatus('loading','🚫','Camera Blocked','Allow camera access and refresh');
+    } else if(err.name==='NotFoundError'){
+      speak('No camera found on this device.');
+      setStatus('loading','❌','No Camera','Connect a camera and try again');
+    } else {
+      speak('Camera could not start. Please try again.');
+      setStatus('loading','❌','Camera Error',err.message);
+    }
+  }
+}
+
+function stopCamera(){
+  detecting=false;
+  if(animFrame){cancelAnimationFrame(animFrame);animFrame=null}
+  if(videoStream){videoStream.getTracks().forEach(t=>t.stop());videoStream=null}
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  document.getElementById('camOverlay').classList.remove('hidden');
+  document.getElementById('overlayText').innerHTML='Camera stopped.<br>Press <strong>Start Camera</strong> to resume.';
+  document.getElementById('btnStart').disabled=false;
+  document.getElementById('btnStop').disabled=true;
+  document.getElementById('btnScan').disabled=true;
+  document.getElementById('detList').innerHTML='<div class="det-empty">Camera stopped</div>';
+  setStatus('loading','⏸️','Camera Paused','Press Start Camera to resume');
+  speak('Camera stopped.');
+}
+
+async function scanOnce(){
+  if(!model||!detecting){speak('Camera is not active. Start camera first.');return}
+  speak('Scanning your surroundings now.');
+  try{
+    const preds=await model.detect(video);
+    const valid=preds.filter(p=>p.score>0.5);
+    if(!valid.length){speak('No objects detected. Path appears to be clear.');return}
+    const names=valid.map(p=>{
+      const dir=getDirection(p.bbox);
+      const dist=getDistance(p.bbox);
+      return`${p.class} ${dir}, ${dist.label}`;
+    });
+    speak('I can see: '+names.join('. '));
+  }catch(e){speak('Scan failed. Please try again.')}
+}
+
+async function checkDanger(){
+  if(!model||!detecting){speak('Camera is not active.');return}
+  const preds=await model.detect(video);
+  const dangers=preds.filter(p=>{
+    const info=PRIORITY[p.class];
+    return info&&info.level==='danger'&&p.score>0.5;
+  });
+  if(!dangers.length) speak('No immediate dangers detected. You appear to be safe.');
+  else{
+    speak('Danger detected! '+dangers.map(p=>`${PRIORITY[p.class].msg} ${getDirection(p.bbox)}`).join('. '));
+    vibrate();
+  }
+}
+
+async function howFar(){
+  if(!model||!detecting){speak('Camera is not active.');return}
+  const preds=await model.detect(video);
+  if(!preds.length){speak('No objects detected nearby.');return}
+  const nearest=preds.sort((a,b)=>{
+    const ra=(a.bbox[2]*a.bbox[3])/(video.videoWidth*video.videoHeight);
+    const rb=(b.bbox[2]*b.bbox[3])/(video.videoWidth*video.videoHeight);
+    return rb-ra;
+  })[0];
+  const dist=getDistance(nearest.bbox);
+  const dir=getDirection(nearest.bbox);
+  speak(`The nearest object is a ${nearest.class} ${dir}, it is ${dist.label}.`);
+}
+
+function speakHelp(){
+  speak('Camera eyes commands. Start camera to begin detection. Stop camera to pause. What is in front of me for a scan. Any danger nearby to check threats. How far is it for distance of nearest object.');
+}
+
+window.addEventListener('voxsense-camera-command',(e)=>{
+  const cmd=(e.detail||'').toLowerCase().trim();
+  if(cmd.includes('start camera')) startCamera();
+  else if(cmd.includes('stop camera')) stopCamera();
+  else if(cmd.includes('what is in front')||cmd.includes('in front')) scanOnce();
+  else if(cmd.includes('describe')) scanOnce();
+  else if(cmd.includes('any danger')) checkDanger();
+  else if(cmd.includes('how far')) howFar();
+  else if(cmd.includes('camera help')) speakHelp();
+});
+
+// Dark camera check
+setInterval(()=>{
+  if(!detecting) return;
+  try{
+    const tc=document.createElement('canvas');tc.width=10;tc.height=10;
+    const tc2=tc.getContext('2d');tc2.drawImage(video,0,0,10,10);
+    const data=tc2.getImageData(0,0,10,10).data;
+    const avg=Array.from(data).reduce((a,b)=>a+b,0)/data.length;
+    if(avg<10) speak('Camera is covered or too dark. Please uncover the camera.');
+  }catch(e){}
+},5000);
+
+function goBack(){ stopCamera(); window.location.href='index.html'; }
+
+window.addEventListener('load',()=>{
+  speak('Camera Eyes page loaded. Press Start Camera to begin.');
+  setStatus('loading','📷','Camera Eyes Ready','Press Start Camera to begin detection');
+  setTimeout(async()=>{
+    try{
+      setStatus('loading','🧠','Pre-loading AI...','Loading COCO-SSD model');
+      model=await cocoSsd.load();
+      setStatus('loading','✅','AI Ready','Press Start Camera to begin');
+      speak('AI model loaded. Press Start Camera to begin.');
+    }catch(e){
+      speak('AI model could not load. Please check your internet connection.');
+      setStatus('loading','❌','Model Load Failed','Check internet and refresh');
+    }
+  },1000);
+});
+</script>
+</body>
+</html>
